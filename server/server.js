@@ -1,18 +1,43 @@
-// io object allows us to interact with our connections
-const io = require('socket.io')(3001, {
-    cors: {
-        origin: "http://localhost:3000",
-        // socket.io uses Get and Post only
-        methods: ["GET", "POST"]
-    }
+const mongoose = require("mongoose")
+require('dotenv').config();
+const Document = require("./Document")
+
+mongoose.connect(process.env.DATABASE_URL, { 
+    useNewUrlParser: true, 
+    useUnifiedTopology: true,
+    useFindAndModify: false,
+    useCreateIndex: true
 })
 
-// every time client connects it will run this connection and give us a socket to communicate back to our client
-io.on("connection", socket => {
-    socket.on('send-changes', delta => {
-        // On current socket, broadcast this to everyone else
-        // except for me
-        // delta are the changes that others will see
-        socket.broadcast.emit('receieve-changes', delta)
-    })
+const io = require("socket.io")(3001, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+  },
 })
+
+const defaultValue = ""
+
+io.on("connection", socket => {
+  socket.on("get-document", async documentId => {
+    const document = await findOrCreateDocument(documentId)
+    socket.join(documentId)
+    socket.emit("load-document", document.data)
+
+    socket.on("send-changes", delta => {
+      socket.broadcast.to(documentId).emit("receive-changes", delta)
+    })
+
+    socket.on("save-document", async data => {
+      await Document.findByIdAndUpdate(documentId, { data })
+    })
+  })
+})
+
+async function findOrCreateDocument(id) {
+  if (id == null) return
+
+  const document = await Document.findById(id)
+  if (document) return document
+  return await Document.create({ _id: id, data: defaultValue })
+}
